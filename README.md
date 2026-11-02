@@ -3,7 +3,8 @@
 One place for your team's projects, tasks and EOS (Vision, 1-Year Plan, Rocks, Scorecard, Issues, the weekly
 meeting and History). It runs on Cloudflare: one Worker plus a D1 database. Your team signs in with Google.
 
-Made by [Spearleaf](https://spearleaf.com) for its own team, shared as a starting point for yours.
+Made by [Spearleaf](https://spearleaf.com) for its own team, shared as a starting point for yours. Free to use,
+change and share under the MIT license (see `LICENSE`).
 
 - `public/`: the app (plain HTML, CSS and JS, no build step)
 - `src/`: the Worker. `auth.js` handles sign-in, `data.js` handles loading and saving, `index.js` routes requests.
