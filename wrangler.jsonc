@@ -1,0 +1,35 @@
+{
+  // HQ: projects, tasks and EOS for your team. Fill in the parts marked CHANGE, then follow README.md.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "hq",
+  "main": "src/index.js",
+  "compatibility_date": "2026-06-01",
+  // CHANGE: your Cloudflare account id (run `npx wrangler whoami`). Remove the line if you have only one account.
+  "account_id": "YOUR_CLOUDFLARE_ACCOUNT_ID",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/auth/*"]
+  },
+  "d1_databases": [
+    // CHANGE: database_id comes from `npx wrangler d1 create hq` (README step 3).
+    { "binding": "DB", "database_name": "hq", "database_id": "YOUR_D1_DATABASE_ID", "migrations_dir": "migrations" }
+  ],
+  // CHANGE: the address the app lives at. The domain must be on your Cloudflare account.
+  // No domain yet? Delete "routes" and set "workers_dev": true; the app then runs at hq.<your-subdomain>.workers.dev.
+  "routes": [{ "pattern": "hq.yourcompany.com", "custom_domain": true }],
+  "preview_urls": false,
+  "vars": {
+    // CHANGE all of these.
+    "COMPANY_NAME": "Your Company",          // shown in the menu, the sign-in page and the browser tab
+    "LOGO": "",                              // optional: put a logo in public/ (e.g. public/logo.svg) and write "/logo.svg"
+    "ALLOWED_DOMAINS": "yourcompany.com",    // anyone with a Google account on these domains can sign in (comma-separated)
+    "ALLOWED_EMAILS": "",                    // plus these single addresses, e.g. a contractor's Gmail (comma-separated)
+    "ADMIN_EMAILS": "you@yourcompany.com",   // always admins (comma-separated)
+    "GOOGLE_CLIENT_ID": "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com"
+  },
+  // The Google client ID is public; the app never uses the client secret.
+  // Secrets (set with `npx wrangler secret put NAME`, never in this file): PREVIEW_CODE (optional, for testing).
+  "observability": { "enabled": true }
+}

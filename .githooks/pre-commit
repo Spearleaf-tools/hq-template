@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Pre-commit hook: secret scan only. Commits block ONLY on safety (gitleaks).
+# Turn it on in each clone: git config core.hooksPath .githooks
+# To bypass intentionally (rare, document why): git commit --no-verify
+
+set -euo pipefail
+
+if command -v gitleaks >/dev/null 2>&1; then
+  if ! gitleaks git --staged --no-banner --redact --exit-code 1; then
+    echo ""
+    echo "❌ Secrets detected in staged changes. Commit blocked."
+    echo "   Move the value to a Cloudflare secret (npx wrangler secret put NAME) or Doppler,"
+    echo "   and read it from env in the Worker. If it's a false positive, add an exception to .gitleaks.toml"
+    exit 1
+  fi
+else
+  echo "WARNING: gitleaks not installed. Skipping secret scan. (brew install gitleaks)"
+fi
+
+exit 0

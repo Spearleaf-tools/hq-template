@@ -1,0 +1,5 @@
+# Local testing only. Copy to .dev.vars (which git ignores): cp .dev.vars.example .dev.vars
+# These override the matching settings in wrangler.jsonc while you run `wrangler dev`.
+DEV_LOGIN=1
+ALLOWED_DOMAINS=example.com
+COMPANY_NAME=Example Co
