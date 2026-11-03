@@ -175,7 +175,7 @@ textarea.fin{max-width:none;resize:vertical}
 .addin:focus,.addbar input:focus,.subadd input:focus,.vli.add input:focus{outline:none}
 .addrow:focus-within{background:var(--cream)}
 .board-wrap{overflow-x:auto;padding-bottom:6px}
-.board{display:grid;grid-template-columns:repeat(3,minmax(250px,1fr));gap:14px;min-width:min-content}
+.board{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(250px,1fr);gap:14px;min-width:min-content}
 .col{background:var(--cream);border-radius:16px;padding:12px;display:flex;flex-direction:column;gap:10px;min-height:240px}
 .col.over{outline:2px dashed var(--velvet);outline-offset:-5px}
 .col-h{display:flex;justify-content:space-between;font-weight:600;font-size:11.5px;letter-spacing:.09em;text-transform:uppercase;padding:4px 6px}
@@ -493,7 +493,7 @@ h1{letter-spacing:-.03em;line-height:1.05}
   .ph{margin-bottom:18px}
   .ph-act{width:100%}
   .ph-act .btn-primary{margin-left:auto}
-  .board{grid-template-columns:repeat(3,82vw);scroll-snap-type:x mandatory}
+  .board{grid-auto-columns:82vw;scroll-snap-type:x mandatory}
   .board-wrap{scroll-snap-type:x mandatory;margin:0 -16px;padding:0 16px 6px}
   .col{scroll-snap-align:start}
   .drawer{width:100%}
@@ -603,6 +603,7 @@ button.nav-h:hover{color:var(--ink)}
 .vp-h{margin:0;font-size:12.5px;color:var(--muted);line-height:1.45}
 .vp-f{display:grid;gap:5px;font-size:12px;font-weight:600;color:var(--ink-2)}
 .vp-f .fin{width:100%}
+.vp-chk{display:flex;align-items:center;gap:8px}
 @media (max-width:860px){
   .vopts{margin-left:0}
   .vpop{left:0;right:auto}
@@ -742,3 +743,14 @@ section.drop-in>.lg-h{box-shadow:0 2px 0 var(--ink)}
 .nav-prow.drop-after{box-shadow:inset 0 -2px 0 var(--ink)}
 .nav-prow .pgrip{color:inherit}
 .nav-prow .pgrip:hover{background:none}
+/* "Add section": a quiet last column on the board, a line under the last section in the list */
+.col.secadd{background:none;min-height:0;padding:12px 0;align-self:start}
+.lrow.secadd{padding:14px 0 4px}
+.lrow.secadd .addcard{width:auto;padding:8px 14px}
+/* Section names rename in place: looks like the heading, shows a line and a pencil on hover */
+.secname{font:inherit;letter-spacing:inherit;text-transform:inherit;color:inherit;background:none;border:0;border-bottom:1.5px dashed transparent;padding:0 2px;margin:0 -2px;min-width:3ch;field-sizing:content;border-radius:0}
+.secname:hover{border-bottom-color:var(--line-2)}
+.secname:focus{outline:none;border-bottom-color:var(--ink);background:#fff}
+.secpen{color:var(--muted);opacity:0;transition:opacity .15s;display:inline-flex;align-self:center}
+.lg-h:hover .secpen,.col-h:hover .secpen{opacity:1}
+.secname:focus+.secpen{opacity:0}

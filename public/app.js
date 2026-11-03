@@ -397,12 +397,13 @@ function shareBtn(p){const ms=membersOf(p.id);const faces=ms.slice(0,3).map(m=>a
 // Filters that are on, in words, each with an × to clear it.
 function filterChips(){const c=[];
   if(S.pwho!=='all')c.push(['pwho',S.pwho==='none'?'Only unassigned tasks':`Only ${esc(first(S.pwho))}’s tasks`]);
-  if(S.tab==='list'&&S.pgroup!=='status')c.push(['pgroup',`Grouped by ${esc(groupOf(S.pgroup).label)}`]);
+  if(S.pgroup!=='status')c.push(['pgroup',`Grouped by ${esc(groupOf(S.pgroup).label)}`]);
   if(S.tab==='list'&&S.sort.k!=='order')c.push(['sort',`Sorted by ${S.sort.k.startsWith('f:')?esc(colById(S.sort.k)?.label||'a column'):SORT_NAME[S.sort.k]||'a column'}`]);
   return c}
 function viewBar(p,shown,total){const chips=filterChips();const on=chips.length;
-  // Grouping shows once the project has a dropdown column to group by.
-  const grp=S.tab==='list'&&(Object.keys(fieldGroups()).length||S.pgroup!=='status')?`<label class="vp-f">Group the list by<select class="fin" data-change="pgroup">${Object.entries(allGroups()).map(([k,g])=>`<option value="${k}" ${S.pgroup===k?'selected':''}>${esc(g.label)}</option>`).join('')}</select></label>`:'';
+  // The list's sections and the board's columns both follow this, so a project's own Section column drives both.
+  const grp=(Object.keys(fieldGroups()).length||S.pgroup!=='status'?`<label class="vp-f">${S.tab==='list'?'Group the list by':'Board columns'}<select class="fin" data-change="pgroup">${Object.entries(allGroups()).map(([k,g])=>`<option value="${k}" ${S.pgroup===k?'selected':''}>${esc(g.label)}</option>`).join('')}</select></label>`:'')
+    +(S.pgroup==='status'?'':`<label class="vp-f vp-chk"><input type="checkbox" data-change="pdone" ${S.pdone?'checked':''}> Show finished tasks</label>`);
   const who=`<label class="vp-f">Show tasks for<select class="fin" data-change="pwho"><option value="all">Everyone</option>${D.people.filter(x=>x.active||x.id===S.pwho).sort((a,b)=>a.name.localeCompare(b.name)).map(x=>`<option value="${x.id}" ${S.pwho===x.id?'selected':''}>${esc(x.name)}${x.active?'':' (archived)'}</option>`).join('')}<option value="none" ${S.pwho==='none'?'selected':''}>Nobody yet (unassigned)</option></select></label>`;
   return `<div class="vbar"><div class="seg" role="group" aria-label="View as"><button aria-pressed="${S.tab==='list'}" data-act="tab" data-t="list">${I('list',15)} List</button><button aria-pressed="${S.tab==='board'}" data-act="tab" data-t="board">${I('board',15)} Board</button></div>
     <span class="vb-n">${on&&shown!==total?`${shown} of ${total} tasks`:`${total} task${total===1?'':'s'}`}</span>
@@ -412,7 +413,9 @@ function vProject(){
   const p=proj(S.projectId);if(!p){S.view='projects';return vProjects()}
   if(S.sort.k.startsWith('f:')&&!colById(S.sort.k))S.sort={k:'order',dir:1};
   if(S.pgroup.startsWith('f:')&&!fieldGroups()[S.pgroup])S.pgroup='status';
-  const all=D.tasks.filter(t=>t.project===p.id&&!t.parent);const ts=all.filter(matchWho);
+  if(PG[p.id]!==S.pgroup){PG[p.id]=S.pgroup;try{localStorage.setItem('hq-group',JSON.stringify(PG))}catch{}}
+  // In sections (anything but status), finished tasks hide unless asked for; status has its own Done group.
+  const all=D.tasks.filter(t=>t.project===p.id&&!t.parent);const ts=all.filter(matchWho).filter(t=>S.pgroup==='status'||S.pdone||t.status!=='done');
   const late=p.due&&p.due<TODAY&&!p.archived;
   return `<header class="ph"><div><div class="eyebrow">Project · ${esc(first(p.owner))} owns it · ${isPrivate(p)?`${I('lock',11)} private`:'open to everyone'}${p.due?` · <span class="${late?'odl':''}">due ${fmt(p.due,false)}</span>`:''}${p.archived?' · archived':''}</div><textarea id="p-title" class="ph-title" rows="1" data-live="ptitle" data-change="refresh" data-id="${p.id}" aria-label="Project name" placeholder="Name this project">${esc(p.name)}</textarea><p class="sub">${p.desc?esc(p.desc)+' ':''}<button class="link" data-act="modal" data-k="editProject">${p.desc?'Edit project details':'Add an owner, due date or description'}</button></p></div>
   <div class="ph-act">${shareBtn(p)}${projMenu(p)}<button class="btn btn-primary" data-act="addCard" data-st="todo">${I('plus',15)} Add task</button></div></header>
@@ -436,6 +439,8 @@ const fieldsOf=p=>Array.isArray(p?.fields)?p.fields:[];
 // A project's own column is a dropdown (options with colors, shown like Priority), text, or a number.
 const FTYPES={select:{label:'Dropdown',icon:'fsel',sub:'Pick from a list you set up, like Priority'},text:{label:'Text',icon:'ftext',sub:'Any words or notes'},number:{label:'Number',icon:'fnum',sub:'Amounts, counts or money'}};
 const ftype=f=>Object.hasOwn(FTYPES,f.type)?f.type:'text';
+// A dropdown column named Section is the project's sections: the project opens grouped by it until someone picks otherwise.
+const secOf=p=>{const f=fieldsOf(p).find(x=>ftype(x)==='select'&&/^sections?$/i.test(x.name.trim()));return f?'f:'+f.id:null};
 const FCOLORS=['#1B1714','#FB8B22','#F8B822','#234E96','#2F7D6D','#B5473A','#6E6658','#D8CFBE'];
 const darkBg=c=>{const n=parseInt(c.slice(1),16);return ((n>>16)*299+(n>>8&255)*587+(n&255)*114)/1000<150};
 function fieldCell(f,t){const v=t.extra?.[f.id];const at=`data-change="fval" data-id="${t.id}" data-f="${f.id}" aria-label="${esc(f.name||'Untitled')} for ${esc(t.title)}"`;
@@ -448,6 +453,8 @@ const allCols=()=>[...LCOLS,...fieldsOf(proj(S.projectId)).map(fieldCol)];
 const colById=k=>k==='name'?NAMEC:allCols().find(c=>c.k===k);
 function loadCols(){try{const v=JSON.parse(localStorage.getItem('hq-cols')||'null');if(v&&typeof v==='object')return{w:v.w||{},off:v.off||{}}}catch{}return{w:{},off:{}}}
 const CP=loadCols();
+// How each project was last grouped (its sections, status...), kept on this device so it reopens the same way.
+const PG=(()=>{try{const v=JSON.parse(localStorage.getItem('hq-group')||'null');if(v&&typeof v==='object')return v}catch{}return{}})();
 const saveCols=()=>{try{localStorage.setItem('hq-cols',JSON.stringify(CP))}catch{}};
 const colOn=c=>c.k in CP.off?!CP.off[c.k]:!c.off;
 const colW=c=>Math.max(c.min,Math.round(+CP.w[c.k]||c.w));
@@ -498,12 +505,14 @@ function sorted(ts){const{k,dir}=S.sort;const key=SORT_KEY[k]||(String(k).starts
   return [...ts].sort((a,b)=>{const x=key(a),y=key(b);if(x!==y){if(x==null)return 1;if(y==null)return -1;return (x<y?-1:1)*dir}return byDue(a,b)||byPri(a,b)})}
 const sortH=(k,label)=>{const on=S.sort.k===k;return `<button class="sorth ${on?'on':''}" data-act="sortBy" data-k="${k}" aria-pressed="${on}" title="Sort by ${label.toLowerCase()}">${label}${on?`<span class="arr" aria-hidden="true">${S.sort.dir>0?'↑':'↓'}</span>`:''}</button>`};
 function listView(ts){const cs=shownCols();const G=groupOf(S.pgroup);const own=S.pgroup!=='status';
-  const addRow=`<div class="lrow addrow"><span class="lname"><span class="grip-slot"></span><span class="car-slot"></span><span class="chk-slot plus">${I('plus',15)}</span><input id="add-task" class="addin" placeholder="Add a task, then press Enter" aria-label="New task title" data-enter="addTask" enterkeyhint="done"></span></div>`;
+  // Sections each get their own "Add a task" at the bottom; the first keeps the id the rest of the app uses.
+  const addRow=(k,first)=>`<div class="lrow addrow"><span class="lname"><span class="grip-slot"></span><span class="car-slot"></span><span class="chk-slot plus">${I('plus',15)}</span><input id="${first?'add-task':'add-task-'+esc(k)}" class="addin" placeholder="Add a task, then press Enter" aria-label="New task${k==null?'':' in '+esc(G.name(k))}" data-enter="addTask" ${k==null?'':`data-g="${esc(k)}"`} enterkeyhint="done"></span></div>`;
   return `<div class="lwrap"><div class="ltab" style="${colStyle(cs)}"><div class="lhead"><span class="lname"><span class="grip-slot"></span><span class="car-slot"></span><span class="chk-slot"></span>${sortH('title','Task')}${rszH(NAMEC)}</span>${cs.map(colHead).join('')}${colsMenu()}</div>`+
   G.keys(ts).map((k,i)=>{const mine=ts.filter(t=>G.of(t)===k);const g=!own&&k==='done'&&S.sort.k==='due'?mine.sort((a,b)=>(b.doneAt||'').localeCompare(a.doneAt||'')):sorted(mine);
     if(!g.length&&(!G.keepEmpty||G.hideEmpty?.(k)))return '';const dot=G.color?.(k);
-    return `<section data-sec="${esc(k)}"><h3 class="lg-h">${dot?`<span class="gdot" style="background:${dot}"></span>`:''}${esc(G.name(k))} <span class="n">${g.length}</span></h3>${g.map(t=>lrow(t,false,cs,k)+(S.open[t.id]?sorted(subsOf(t.id)).map(x=>lrow(x,true,cs,k)).join(''):'')).join('')}
-    ${i===0?addRow:''}</section>`}).join('')+`</div></div>`;
+    const shut=S.fold?.[k];
+    return `<section data-sec="${esc(k)}"><h3 class="lg-h"><button class="caret ${shut?'':'open'}" data-act="fold" data-k="${esc(k)}" aria-expanded="${!shut}" aria-label="${shut?'Open':'Fold'} ${esc(G.name(k))}">${I('caret',14)}</button>${dot?`<span class="gdot" style="background:${dot}"></span>`:''}${secName(G,k)} <span class="n">${g.length}</span></h3>${shut?'':g.map(t=>lrow(t,false,cs,k)+(S.open[t.id]?sorted(subsOf(t.id)).map(x=>lrow(x,true,cs,k)).join(''):'')).join('')}
+    ${shut?'':own?addRow(k,i===0):i===0?addRow(null,true):''}</section>`}).join('')+(own?secAdd('lrow addrow secadd'):'')+`</div></div>`;
 }
 // Put a task before or after another one (or at the end of a group) in the custom order. Only the moved task gets a
 // new number unless its neighbours have none yet; then the whole group is numbered once. Dropped into another
@@ -534,9 +543,14 @@ function nudgeTask(id,dir){const r=document.querySelector(`.lrow[data-row="${id}
 const cCount=t=>{const n=D.comments.filter(c=>c.task===t.id).length;return n?`<span class="subn" title="${n} comment${n>1?'s':''}">${I('chat',12)} ${n}</span>`:''};
 function card(t){const s=subsOf(t.id);const d=s.filter(x=>x.status==='done').length;
   return `<div class="card ${t.status==='done'?'isdone':''}" draggable="true" data-drag="${t.id}" data-act="openTask" data-id="${t.id}" role="button" tabindex="0"><div class="card-top"><div class="card-t">${esc(t.title)}</div>${taskMenu(t)}</div>${t.status==='done'?'':priTag(t)}${t.rock?`<span class="chip chip-rock sm">${I('star',10)} Rock</span>`:''}<div class="card-m">${av(t.owner)}${due(t)}${s.length?`<span class="subn">${I('sub',12)} ${d}/${s.length}</span>`:''}${cCount(t)}</div></div>`}
-function boardView(ts){
-  return `<div class="board-wrap"><div class="board">${['todo','doing','done'].map(st=>{const g=ts.filter(t=>t.status===st).sort(byDue);
-    return `<section class="col" data-drop="${st}" aria-label="${ST[st]}"><header class="col-h"><span>${ST[st]}</span><span class="n">${g.length}</span></header>${g.map(card).join('')}<button class="addcard" data-act="addCard" data-st="${st}">${I('plus',14)} Add task</button></section>`}).join('')}</div></div><p class="hint">Drag a card to another column to change its status. On a phone, swipe between columns and open a card to change its status.</p>`;
+// A section's name is a box you click to rename (a project's own sections only; "No Section" and statuses stay fixed).
+const secName=(G,k)=>{const n=G.name(k);return G.own&&k?`<input class="secname" value="${esc(n)}" size="${Math.max(3,n.length)}" maxlength="60" data-change="secName" data-k="${esc(k)}" aria-label="Rename section ${esc(n)}" title="Click to rename"><span class="secpen" aria-hidden="true">${I('pencil',12)}</span>`:esc(n)};
+// Grouped by a project's own dropdown, "Add section" opens that column with a new empty option to name.
+const secAdd=cls=>`<div class="${cls}"><button class="addcard" data-act="secAdd">${I('plus',14)} Add section</button></div>`;
+// The board's columns are the same groups as the list: status, or the project's own sections.
+function boardView(ts){const G=groupOf(S.pgroup);
+  return `<div class="board-wrap"><div class="board">${G.keys(ts).map(k=>{const g=ts.filter(t=>G.of(t)===k).sort(byDue);if(!g.length&&(!G.keepEmpty||G.hideEmpty?.(k)))return '';const dot=G.color?.(k);
+    return `<section class="col" data-drop="${esc(k)}" aria-label="${esc(G.name(k))}"><header class="col-h"><span>${dot?`<span class="gdot" style="background:${dot}"></span>`:''}${secName(G,k)}</span><span class="n">${g.length}</span></header>${g.map(card).join('')}<button class="addcard" data-act="addCard" data-g="${esc(k)}">${I('plus',14)} Add task</button></section>`}).join('')}${G.own?secAdd('col secadd'):''}</div></div><p class="hint">Drag a card to another column to move it there. On a phone, swipe between columns and open a card to change it.</p>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -900,7 +914,7 @@ const ACT={
   retrySave:()=>commit(),
   pgrip:()=>{},
   newProject:()=>{const p={id:uid('p'),name:'',owner:ME,due:null,archived:0,desc:'',createdAt:TODAY,visibility:'members',createdBy:ME,sort:Math.max(0,...D.projects.map(x=>x.sort||0))+1024};D.projects.push(p);addMember(p,ME,'manage');S.projectId=p.id;S.tab='list';S.pwho='all';go('project');refocus('p-title')},
-  openProject:a=>{S.projectId=a.dataset.id;S.pwho='all';S.vopts=false;go('project')},
+  openProject:a=>{S.projectId=a.dataset.id;S.pwho='all';S.vopts=false;S.pgroup=PG[a.dataset.id]||secOf(proj(a.dataset.id))||'status';go('project')},
   projTab:a=>{S.projTab=a.dataset.t;renderMain()},
   restoreProject:a=>{proj(a.dataset.id).archived=0;render();toast('Project restored')},
   askArchive:()=>{S.confirmArchive=S.projectId;renderMain()},
@@ -917,7 +931,9 @@ const ACT={
   parentOnly:()=>{setStatus(task(S.marg),'done');S.modal=null;render();toast('Done. Its subtasks stay open.')},
   parentAll:()=>{const t=task(S.marg);setStatus(t,'done');subsOf(t.id).forEach(s=>{if(s.status!=='done')setStatus(s,'done')});S.modal=null;render();toast('Done, with all its subtasks')},
   expand:a=>{S.open[a.dataset.id]=!S.open[a.dataset.id];renderMain()},
-  addCard:a=>{const t=newTask({project:S.projectId,status:a.dataset.st});renderMain();openDrawer('task',t.id,true)},
+  fold:a=>{S.fold={...S.fold,[a.dataset.k]:!S.fold?.[a.dataset.k]};renderMain()},
+  // From a column's own button the task lands in that column; from the top button, in the first section.
+  addCard:a=>{const t=newTask({project:S.projectId,status:a.dataset.st});const G=groupOf(S.pgroup);const k=a.dataset.g??(G.own?G.keys([])[0]:null);if(k!=null)G.set(t,k);renderMain();openDrawer('task',t.id,true)},
   quickTask:()=>{const w=S.who||ME;const t=newTask({owner:w==='none'?null:w});renderMain();openDrawer('task',t.id,true)},
   askDel:a=>{S.confirmDel=a.dataset.id;renderDrawer()},
   cancelDel:()=>{S.confirmDel=null;renderDrawer();renderMain()},
@@ -980,6 +996,7 @@ const ACT={
   fieldNew:()=>{S.fdraft={type:null,name:'',opts:[]};S.menu=null;S.modal='field';renderMain();renderModal()},
   fieldEdit:a=>{const f=fieldsOf(proj(S.projectId)).find(x=>x.id===a.dataset.f);if(!f)return;S.fdraft={id:f.id,type:ftype(f),name:f.name,opts:(f.opts||[]).map(o=>({...o}))};S.menu=null;S.modal='field';renderMain();renderModal()},
   fieldType:a=>{const d=S.fdraft;d.type=a.dataset.t;if(d.type==='select'&&!d.opts.length)d.opts=[{id:uid('o'),name:'',color:FCOLORS[0]},{id:uid('o'),name:'',color:FCOLORS[5]}];renderModal()},
+  secAdd:()=>{ACT.fieldEdit({dataset:{f:S.pgroup.slice(2)}});ACT.optAdd()},
   fieldBack:()=>{S.fdraft.type=null;renderModal()},
   optAdd:()=>{const o=S.fdraft.opts;o.push({id:uid('o'),name:'',color:FCOLORS[(o.length*3)%FCOLORS.length]});renderModal();[...document.querySelectorAll('.fopt .fin')].pop()?.focus()},
   optDel:a=>{S.fdraft.opts.splice(+a.dataset.o,1);renderModal()},
@@ -1003,6 +1020,10 @@ const ACT={
 };
 const CH={
   pgroup:el=>{S.pgroup=el.value;renderMain()},
+  pdone:el=>{S.pdone=el.checked;renderMain()},
+  // An empty name puts the old one back.
+  secName:el=>{const p=proj(S.projectId),fid=S.pgroup.slice(2),v=el.value.trim().slice(0,60);
+    p.fields=fieldsOf(p).map(f=>f.id!==fid?f:{...f,opts:f.opts.map(o=>o.id===el.dataset.k&&v?{...o,name:v}:o)});renderMain();if(v)toast('Section renamed')},
   refresh:()=>renderMain(),
   who:el=>{S.who=el.value;S.resetScroll=true;renderMain()},
   pwho:el=>{S.pwho=el.value;renderMain()},
@@ -1051,7 +1072,7 @@ const LIVE={
 };
 const ENTER={
   optAdd:()=>ACT.optAdd(),
-  addTask:el=>{const v=el.value.trim();if(!v)return;const t=newTask({project:S.projectId,title:v});if(S.pgroup!=='status'&&S.tab==='list'){const G=groupOf(S.pgroup),k=G.keys([])[0];if(k)G.set(t,k)}renderMain();refocus('add-task')},
+  addTask:el=>{const v=el.value.trim();if(!v)return;const t=newTask({project:S.projectId,title:v});if(S.pgroup!=='status'&&S.tab==='list'){const G=groupOf(S.pgroup),k=el.dataset.g??G.keys([])[0];if(k!=null)G.set(t,k)}const id=el.id;renderMain();refocus(id)},
   addSub:el=>{const v=el.value.trim();if(!v)return;const p=task(el.dataset.id);newTask({project:p.project,parent:p.id,title:v,owner:p.owner});S.open[p.id]=true;render();refocus('d-sub')},
   addMilestone:el=>{const v=el.value.trim();if(!v)return;const r=rock(el.dataset.id);newTask({rock:r.id,title:v,owner:r.owner});render();refocus('d-sub')},
   addIssue:el=>{const v=el.value.trim();if(!v)return;newIssue(v,el.dataset.list);renderMain();refocus('add-issue');toast('Issue added')},
@@ -1096,8 +1117,8 @@ document.addEventListener('keydown',e=>{
 });
 document.addEventListener('dragstart',e=>{const c=e.target.closest?.('[data-drag]');if(!c)return;e.dataTransfer.setData('text/plain',c.dataset.drag);e.dataTransfer.effectAllowed='move';c.classList.add('dragging')});
 document.addEventListener('dragend',()=>{document.querySelectorAll('.dragging,.col.over').forEach(x=>x.classList.remove('dragging','over'))});
-document.addEventListener('dragover',e=>{const col=e.target.closest?.('[data-drop]');if(!col)return;e.preventDefault();document.querySelectorAll('.col.over').forEach(c=>{if(c!==col)c.classList.remove('over')});col.classList.add('over')});
-document.addEventListener('drop',e=>{const col=e.target.closest?.('[data-drop]');if(!col||!D)return;e.preventDefault();const t=task(e.dataTransfer.getData('text/plain'));if(t&&t.status!==col.dataset.drop){if(col.dataset.drop==='done'&&subsOf(t.id).some(s=>s.status!=='done')){S.modal='parentDone';S.marg=t.id;renderMain();renderModal();return}setStatus(t,col.dataset.drop);toast(`Moved to ${ST[t.status]}`)}renderMain();schedule()});
+document.addEventListener('dragover',e=>{const col=e.target.closest?.('[data-drop]');if(!col||!groupOf(S.pgroup).set)return;e.preventDefault();document.querySelectorAll('.col.over').forEach(c=>{if(c!==col)c.classList.remove('over')});col.classList.add('over')});
+document.addEventListener('drop',e=>{const col=e.target.closest?.('[data-drop]');if(!col||!D)return;e.preventDefault();const t=task(e.dataTransfer.getData('text/plain'));const G=groupOf(S.pgroup),k=col.dataset.drop;if(t&&G.set&&G.of(t)!==k){if(S.pgroup==='status'&&k==='done'&&subsOf(t.id).some(s=>s.status!=='done')){S.modal='parentDone';S.marg=t.id;renderMain();renderModal();return}G.set(t,k);toast(`Moved to ${G.name(k)}`)}renderMain();schedule()});
 // Resize a column by dragging the line at the right of its heading; double-click the line to reset that column.
 let rsz=null;
 const drawnW=k=>k==='name'?(nameW()||document.querySelector('.lhead .lname')?.getBoundingClientRect().width||280):colW(colById(k));
