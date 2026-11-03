@@ -512,7 +512,7 @@ function listView(ts){const cs=shownCols();const G=groupOf(S.pgroup);const own=S
     if(!g.length&&(!G.keepEmpty||G.hideEmpty?.(k)))return '';const dot=G.color?.(k);
     const shut=S.fold?.[k];
     return `<section data-sec="${esc(k)}"><h3 class="lg-h"><button class="caret ${shut?'':'open'}" data-act="fold" data-k="${esc(k)}" aria-expanded="${!shut}" aria-label="${shut?'Open':'Fold'} ${esc(G.name(k))}">${I('caret',14)}</button>${dot?`<span class="gdot" style="background:${dot}"></span>`:''}${secName(G,k)} <span class="n">${g.length}</span></h3>${shut?'':g.map(t=>lrow(t,false,cs,k)+(S.open[t.id]?sorted(subsOf(t.id)).map(x=>lrow(x,true,cs,k)).join(''):'')).join('')}
-    ${shut?'':own?addRow(k,i===0):i===0?addRow(null,true):''}</section>`}).join('')+(own?secAdd('lrow addrow secadd'):'')+`</div></div>`;
+    ${shut?'':own?addRow(k,i===0):i===0?addRow(null,true):''}</section>`}).join('')+(own||S.pgroup==='status'?secAdd('lrow addrow secadd'):'')+`</div></div>`;
 }
 // Put a task before or after another one (or at the end of a group) in the custom order. Only the moved task gets a
 // new number unless its neighbours have none yet; then the whole group is numbered once. Dropped into another
@@ -550,7 +550,7 @@ const secAdd=cls=>`<div class="${cls}"><button class="addcard" data-act="secAdd"
 // The board's columns are the same groups as the list: status, or the project's own sections.
 function boardView(ts){const G=groupOf(S.pgroup);
   return `<div class="board-wrap"><div class="board">${G.keys(ts).map(k=>{const g=ts.filter(t=>G.of(t)===k).sort(byDue);if(!g.length&&(!G.keepEmpty||G.hideEmpty?.(k)))return '';const dot=G.color?.(k);
-    return `<section class="col" data-drop="${esc(k)}" aria-label="${esc(G.name(k))}"><header class="col-h"><span>${dot?`<span class="gdot" style="background:${dot}"></span>`:''}${secName(G,k)}</span><span class="n">${g.length}</span></header>${g.map(card).join('')}<button class="addcard" data-act="addCard" data-g="${esc(k)}">${I('plus',14)} Add task</button></section>`}).join('')}${G.own?secAdd('col secadd'):''}</div></div><p class="hint">Drag a card to another column to move it there. On a phone, swipe between columns and open a card to change it.</p>`;
+    return `<section class="col" data-drop="${esc(k)}" aria-label="${esc(G.name(k))}"><header class="col-h"><span>${dot?`<span class="gdot" style="background:${dot}"></span>`:''}${secName(G,k)}</span><span class="n">${g.length}</span></header>${g.map(card).join('')}<button class="addcard" data-act="addCard" data-g="${esc(k)}">${I('plus',14)} Add task</button></section>`}).join('')}${G.own||S.pgroup==='status'?secAdd('col secadd'):''}</div></div><p class="hint">Drag a card to another column to move it there. On a phone, swipe between columns and open a card to change it.</p>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -803,7 +803,7 @@ const MODALS={
       ${d.type==='select'?`<h3>Options</h3><div class="fopts">${d.opts.map((o,i)=>`<div class="fopt"><button type="button" class="fdot" style="background:${o.color}" data-act="optColor" data-o="${i}" aria-label="Change the color of ${esc(o.name||'option '+(i+1))}" title="Change color"></button><input class="fin" value="${esc(o.name)}" placeholder="Option ${i+1}" maxlength="60" data-live="fdraft" data-o="${i}" data-enter="optAdd" aria-label="Option ${i+1}"><button type="button" class="iconbtn xs" data-act="optDel" data-o="${i}" aria-label="Remove ${esc(o.name||'option '+(i+1))}" title="Remove">${I('x',14)}</button></div>`).join('')}<button type="button" class="link fadd" data-act="optAdd">${I('plus',14)} Add option</button></div>`:''}`},
     save:()=>{const d=S.fdraft,p=proj(S.projectId);const name=d.name.trim();if(!name){toast('Give the column a name');return}
       let opts=null;if(d.type==='select'){opts=d.opts.map(o=>({...o,name:o.name.trim()})).filter(o=>o.name);if(!opts.length){toast('Add at least one option');return}}
-      const f={id:d.id||uid('f'),name,type:d.type,...(opts?{opts}:{})};const fs=fieldsOf(p);p.fields=d.id?fs.map(x=>x.id===d.id?f:x):[...fs,f];
+      const f={id:d.id||uid('f'),name,type:d.type,...(opts?{opts}:{})};const fs=fieldsOf(p);p.fields=d.id?fs.map(x=>x.id===d.id?f:x):[...fs,f];if(d.sec)S.pgroup='f:'+f.id;
       // An option that was removed is cleared from the tasks that had it.
       if(opts){const keep=new Set(opts.map(o=>o.id));D.tasks.forEach(t=>{const v=t.extra?.[f.id];if(t.project===p.id&&v!=null&&!keep.has(v)){const x={...t.extra};delete x[f.id];t.extra=Object.keys(x).length?x:null}})}
       S.modal=null;S.fdraft=null;render();toast(d.id?'Column saved':`“${name}” added. Click a cell to fill it in.`)}},
@@ -996,7 +996,9 @@ const ACT={
   fieldNew:()=>{S.fdraft={type:null,name:'',opts:[]};S.menu=null;S.modal='field';renderMain();renderModal()},
   fieldEdit:a=>{const f=fieldsOf(proj(S.projectId)).find(x=>x.id===a.dataset.f);if(!f)return;S.fdraft={id:f.id,type:ftype(f),name:f.name,opts:(f.opts||[]).map(o=>({...o}))};S.menu=null;S.modal='field';renderMain();renderModal()},
   fieldType:a=>{const d=S.fdraft;d.type=a.dataset.t;if(d.type==='select'&&!d.opts.length)d.opts=[{id:uid('o'),name:'',color:FCOLORS[0]},{id:uid('o'),name:'',color:FCOLORS[5]}];renderModal()},
-  secAdd:()=>{ACT.fieldEdit({dataset:{f:S.pgroup.slice(2)}});ACT.optAdd()},
+  // With sections already, add one to them. Without, set up the project's Section column; saving it groups the project by it.
+  secAdd:()=>{const k=S.pgroup.startsWith('f:')?S.pgroup:secOf(proj(S.projectId));if(k){S.pgroup=k;ACT.fieldEdit({dataset:{f:k.slice(2)}});ACT.optAdd();return}
+    S.fdraft={type:'select',name:'Section',opts:[{id:uid('o'),name:'',color:FCOLORS[0]}],sec:true};S.menu=null;S.modal='field';renderMain();renderModal();document.querySelector('.fopt .fin')?.focus()},
   fieldBack:()=>{S.fdraft.type=null;renderModal()},
   optAdd:()=>{const o=S.fdraft.opts;o.push({id:uid('o'),name:'',color:FCOLORS[(o.length*3)%FCOLORS.length]});renderModal();[...document.querySelectorAll('.fopt .fin')].pop()?.focus()},
   optDel:a=>{S.fdraft.opts.splice(+a.dataset.o,1);renderModal()},

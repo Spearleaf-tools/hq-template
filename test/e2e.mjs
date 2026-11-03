@@ -225,6 +225,12 @@ try {
   await js(`S.tab='list';renderMain();return 1`);
   await shot('desktop-project-sections', 1440, 900);
   await step('sections: back to status', () => js(`S.pgroup='status';renderMain();return 'ok'`));
+  await step('sections from nothing: Add section on a project without them sets them up', () => js(`const prev=S.projectId;const p=D.projects.find(x=>!x.archived&&!fieldsOf(x).some(f=>/^sections?$/i.test(f.name)));if(!p)throw new Error('no project without sections');
+    S.projectId=p.id;S.tab='list';S.pgroup='status';go('project');const b=document.querySelector('[data-act="secAdd"]');if(!b)throw new Error('no Add section on a status list');b.click();
+    if(S.modal!=='field'||S.fdraft.name!=='Section')throw new Error('Add section did not open a Section column');const o=document.querySelector('.fopt .fin');o.value='Kickoff';o.dispatchEvent(new Event('input',{bubbles:true}));
+    document.querySelector('form[data-form="field"]').requestSubmit();const f=fieldsOf(proj(p.id)).find(x=>x.name==='Section');if(!f||f.opts[0].name!=='Kickoff')throw new Error('Section column not saved');
+    if(S.pgroup!=='f:'+f.id)throw new Error('not grouped by the new sections');if(!document.querySelector('section[data-sec="'+f.opts[0].id+'"]'))throw new Error('no Kickoff section');
+    S.tab='board';S.pgroup='status';renderMain();if(!document.querySelector('.col.secadd'))throw new Error('no Add section column on a status board');S.tab='list';${settle}S.projectId=prev;S.pgroup='status';go('project');return 'ok'`));
   await step('comments: write, edit and delete on a task', () => js(`const t=D.tasks.find(x=>x.project===S.projectId&&!x.parent);openDrawer('task',t.id);
     const box=document.getElementById('c-new');if(!box)throw new Error('no comment box');box.value='Can we share these on social?\\nhttps://example.com/x';box.dispatchEvent(new Event('input',{bubbles:true}));
     document.querySelector('[data-act="cPost"]').click();const c=D.comments.find(x=>x.task===t.id);if(!c||c.by!==ME)throw new Error('not posted');
