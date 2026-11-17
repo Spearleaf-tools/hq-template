@@ -64,7 +64,13 @@ const TABLES=['people','projects','tasks','comments','rocks','quarters','metrics
 // HIDDEN.ms: per Rock, how many of its milestones sit in private projects this person can't open (counts only).
 let D=null,S=null,ME=null,CONFIG={},SNAP={},lastFocus=null,lastServer='',HIDDEN={ms:{}};
 function initState(){S={view:'mytasks',who:null,projectId:null,tab:'list',pwho:'all',sort:{k:'order',dir:1},pgroup:'status',projTab:'active',open:{},drawer:null,modal:null,marg:null,confirmDel:null,correcting:null,openIssue:null,drafts:{},issuesTab:'weekly',navOpen:false,resetScroll:true,q:'',signinError:'',mt:{running:false,step:0,start:0,stepStart:0,dropped:{},ratings:{},headlines:[],cascades:[],solved:[]}}}
-function load(data,hidden){D={};for(const t of TABLES)D[t]=(data[t]||[]).map(r=>r);HIDDEN=hidden||{ms:{}};SNAP=snapOf()}
+// The archive: a project's tasks finished over 30 days ago stay on the server until someone presses Show archive, so
+// opening HQ stays light. ARCHN: how many each project has. ARCH: per project, the ones loaded on this page so far.
+let ARCHN={},ARCH=new Map();
+function load(data,hidden,arch){D={};for(const t of TABLES)D[t]=(data[t]||[]).map(r=>r);HIDDEN=hidden||{ms:{}};if(arch)ARCHN=arch;
+  // Archive pages already open come back after a teammate's change; a task reopened since comes from the server copy.
+  for(const a of ARCH.values())for(const t of ['tasks','comments']){const ids=new Set(D[t].map(r=>r.id));for(const r of a[t])if(!ids.has(r.id)){ids.add(r.id);D[t].push(r)}}
+  SNAP=snapOf()}
 const snapOf=()=>Object.fromEntries(TABLES.map(t=>[t,new Map(D[t].map(r=>[r.id,JSON.stringify(r)]))]));
 
 const task=id=>D.tasks.find(t=>t.id===id);
@@ -241,7 +247,7 @@ async function refresh(force){
   try{const r=await fetch('/api/data',{headers:{'X-HQ':'1'}});if(r.status===401)return sessionEnded();if(!r.ok)return;
     const j=await r.json();const js=JSON.stringify([j.data,j.hidden]);TODAY=todayET();
     // Checked again now the data is back: someone may have edited, saved or opened something meanwhile.
-    if(g!==gen||my!==refreshSeq||busy()||js===lastServer)return;lastServer=js;load(j.data,j.hidden);ensureBasics();render();schedule()}catch{}
+    if(g!==gen||my!==refreshSeq||busy()||js===lastServer)return;lastServer=js;load(j.data,j.hidden,j.archived);ensureBasics();render();schedule()}catch{}
 }
 setInterval(refresh,20000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});
@@ -410,6 +416,9 @@ function viewBar(p,shown,total){const chips=filterChips();const on=chips.length;
     <span class="vb-n">${on&&shown!==total?`${shown} of ${total} tasks`:`${total} task${total===1?'':'s'}`}</span>
     ${chips.map(([k,l])=>`<span class="fchip">${l}<button data-act="clearFilt" data-k="${k}" aria-label="Clear: ${l}" title="Clear">${I('x',12)}</button></span>`).join('')}
     <details class="vopts" ${S.vopts?'open':''}><summary class="btn btn-ghost btn-sm">${I('list',14)} View options${on?` · ${on}`:''}</summary><div class="vpop"><p class="vp-h">Choose which tasks show and how the list is grouped. This only changes your view, not anyone else’s.</p>${who}${grp}${on?`<button class="link" data-act="clearFilt" data-k="all">Reset to everything</button>`:''}</div></details></div>`}
+function archiveBar(p){const n=ARCHN[p.id]||0;if(!n)return '';const a=ARCH.get(p.id),got=a?a.tasks.filter(t=>!t.parent).length:0,busy=S.archBusy===p.id;
+  if(a&&!a.more)return `<p class="arch-bar">${I('archive',14)} The archive is showing: ${got} task${got===1?'':'s'} finished more than 30 days ago.</p>`;
+  return `<div class="arch-bar"><button class="btn btn-ghost btn-sm" data-act="loadArchive" data-id="${p.id}" ${busy?'disabled':''}>${I('archive',14)} ${busy?'Loading…':got?`Show more of the archive (${n-got} left)`:`Show archive (${n} finished more than 30 days ago)`}</button></div>`}
 function vProject(){
   const p=proj(S.projectId);if(!p){S.view='projects';return vProjects()}
   if(S.sort.k.startsWith('f:')&&!colById(S.sort.k))S.sort={k:'order',dir:1};
@@ -423,7 +432,7 @@ function vProject(){
   ${viewBar(p,ts.length,all.length)}
   ${isPrivate(p)&&membersOf(p.id).length<2&&memberOf(p.id,ME)?`<div class="note">${I('lock',18)}<span>Nobody else is on this project yet, so only you and the admins can see it. Press <b>Share</b> to add people, or open it to the whole team.</span></div>`:''}
   ${S.confirmArchive===p.id?(()=>{const n=projStats(p).open.length;return `<div class="note" role="alert">${I('archive',18)}<span><b>Archive “${esc(p.name||'this project')}”?</b> ${n?`${n} task${n===1?' is':'s are'} still open and will stay open. `:''}It moves to the Archived tab on Projects, and you can restore it any time.</span><span class="row" style="margin-left:auto"><button class="btn btn-sm btn-danger" data-act="archiveProject">Archive</button><button class="link" data-act="cancelArchive">Keep it</button></span></div>`})():''}
-  ${S.tab==='list'?listView(ts):boardView(ts)}`;
+  ${S.tab==='list'?listView(ts):boardView(ts)}${archiveBar(p)}`;
 }
 // The list's columns after the task name. Each person can widen, narrow, hide or show them from the + at the end of
 // the headings; that's kept on this device and applies to every project. A project can also have its own named
@@ -913,6 +922,14 @@ const ACT={
   nav:()=>{S.navOpen=!S.navOpen;renderMain()},
   signout:async()=>{if(diff().length&&!inflight)await commit();if(inflight||diff().length){toast('Some changes haven’t saved yet. Check your connection, then sign out again.');return}await fetch('/auth/signout',{method:'POST'});signedOut()},
   retrySave:()=>commit(),
+  loadArchive:async el=>{const pid=el.dataset.id;if(S.archBusy)return;const a=ARCH.get(pid)||{tasks:[],comments:[],more:true};S.archBusy=pid;renderMain();
+    try{const r=await fetch(`/api/archive?project=${encodeURIComponent(pid)}${a.next?'&after='+encodeURIComponent(a.next):''}`,{headers:{'X-HQ':'1'}});
+      if(r.status===401){S.archBusy=null;return sessionEnded()}const j=await r.json();if(!r.ok)throw new Error(j.error);
+      // A save in flight replaces SNAP when it lands, so wait for it: rows added to SNAP before then would look new.
+      while(inflight)await new Promise(ok=>setTimeout(ok,200));
+      for(const t of ['tasks','comments']){const ids=new Set(D[t].map(x=>x.id));for(const x of j[t]){a[t].push(x);if(!ids.has(x.id)){D[t].push(x);SNAP[t].set(x.id,JSON.stringify(x))}}}
+      a.more=j.more;a.next=j.next;ARCH.set(pid,a);S.pdone=true}catch{toast('Couldn’t load the archive. Try again.')}
+    S.archBusy=null;renderMain()},
   pgrip:()=>{},
   newProject:()=>{const p={id:uid('p'),name:'',owner:ME,due:null,archived:0,desc:'',createdAt:TODAY,visibility:'members',createdBy:ME,sort:Math.max(0,...D.projects.map(x=>x.sort||0))+1024};D.projects.push(p);addMember(p,ME,'manage');S.projectId=p.id;S.tab='list';S.pwho='all';go('project');refocus('p-title')},
   openProject:a=>{S.projectId=a.dataset.id;S.pwho='all';S.vopts=false;S.pgroup=PG[a.dataset.id]||secOf(proj(a.dataset.id))||'status';go('project')},
@@ -1173,7 +1190,7 @@ async function boot(){
   if(r.status!==200){D=null;S.view='signin';renderMain();return}
   ME=j.me.id;
   const d=await fetch('/api/data',{headers:{'X-HQ':'1'}}).then(x=>x.json());
-  lastServer=JSON.stringify([d.data,d.hidden]);load(d.data,d.hidden);applyOutbox();ensureBasics();restoreMeeting();
+  lastServer=JSON.stringify([d.data,d.hidden]);load(d.data,d.hidden,d.archived);applyOutbox();ensureBasics();restoreMeeting();
   const h=location.hash.slice(1);S.view=VIEW[h]&&h!=='project'?h:'mytasks';
   render();schedule(50);
 }
