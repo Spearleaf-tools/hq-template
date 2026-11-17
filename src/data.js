@@ -129,7 +129,7 @@ async function check(c, keys, me, ctx, db) {
     const out = [];
     for (let n = 0; id; n++) {
       if (n > 10 || (pending && ctx.taskDel.has(id))) return null;
-      const r = await db.prepare('SELECT project, parent FROM tasks WHERE id=?').bind(id).first();
+      const r = await ctx.task(id);
       if (!r && !(pending && ctx.taskIns.has(id))) return null;
       out.push(pending && ctx.taskProj.has(id) ? ctx.taskProj.get(id) : r?.project ?? null);
       id = pending && ctx.taskParent.has(id) ? ctx.taskParent.get(id) : r?.parent ?? null;
@@ -202,10 +202,10 @@ async function check(c, keys, me, ctx, db) {
       if (c.f.audience === 'admins' && !admin) throw no('Only an admin can save a version just for admins');
       break;
     case 'tasks': {
-      const cur = c.ins ? null : await row('SELECT project, parent, owner FROM tasks WHERE id=?');
+      const cur = c.ins ? null : await ctx.task(c.id);
       // Where it is now has to be visible (also for a delete), and so does where it's going.
       if (cur && !seesAll(ctx.before, await chain(c.id, false), me.id)) throw no('That task is in a private project');
-      const kids = cur ? (await db.prepare('SELECT id, project FROM tasks WHERE parent=?').bind(c.id).all()).results : [];
+      const kids = cur ? ctx.kids.get(c.id) ?? (await db.prepare('SELECT id, project FROM tasks WHERE parent=?').bind(c.id).all()).results : [];
       if (c.del) {
         // Deleting a task deletes its subtasks, so each of those has to be visible too.
         for (const k of kids) if (!seesAll(ctx.before, await chain(k.id, false), me.id)) throw no('One of its subtasks is in a private project');
@@ -330,7 +330,21 @@ export async function sync(env, me, changes) {
     hidden: hiddenAreas(hs.results[0]?.value), people: new Set(pe.results.map((r) => r.id)),
     before: access(pr.results, pm.results, admins), after: access(pr.results, pm.results, admins),
     created: new Set(), taskProj: new Map(), taskParent: new Map(), taskIns: new Set(), taskDel: new Set(),
+    rows: new Map(), kids: new Map(),
   };
+  // Stored task rows, each read once per save. Every D1 call costs Worker CPU: a 25-task drag that asked one task at a
+  // time ran past the free plan's 10 ms limit and kept retrying (2026-11-17). Nothing is written until the batch at
+  // the end, so a row read once is the same row every check would have read.
+  ctx.task = async (id) => {
+    if (!ctx.rows.has(id)) ctx.rows.set(id, await db.prepare('SELECT id, project, parent, owner FROM tasks WHERE id=?').bind(id).first());
+    return ctx.rows.get(id);
+  };
+  const tids = new Set(changes.filter((c) => c?.t === 'tasks').flatMap((c) => [c.id, c.f?.parent]).filter((x) => typeof x === 'string'));
+  if (tids.size) {
+    const got = (await db.prepare('SELECT id, project, parent, owner FROM tasks WHERE id IN (SELECT value FROM json_each(?1)) OR parent IN (SELECT value FROM json_each(?1))').bind(JSON.stringify([...tids])).all()).results;
+    for (const id of tids) { ctx.rows.set(id, null); ctx.kids.set(id, []); }
+    for (const t of got) { ctx.rows.set(t.id, t); if (tids.has(t.parent)) ctx.kids.get(t.parent).push(t); }
+  }
   // Who will see what once this save lands. Every change here is still checked on its own below, and one refusal
   // refuses the whole save, so a change can't sneak in by leaning on another one that fails.
   const touched = new Map(), removed = [], nowPrivate = [], demoted = [];
@@ -398,7 +412,7 @@ export async function sync(env, me, changes) {
     // "New" is decided by the database, not the request: an insert for a row that already exists is an update, so
     // it gets the same permission checks (closed quarters and years, history that can't change). Saved meetings and
     // Vision versions never change, so a repeat of their insert (a retried save) is skipped.
-    if (c.ins && (await db.prepare(`SELECT 1 FROM "${c.t}" WHERE id=?`).bind(c.id).first())) {
+    if (c.ins && (c.t === 'tasks' ? await ctx.task(c.id) : await db.prepare(`SELECT 1 FROM "${c.t}" WHERE id=?`).bind(c.id).first())) {
       if (def.upd === false) continue;
       c.ins = false;
     }
@@ -423,7 +437,7 @@ export async function sync(env, me, changes) {
         const found = new Set();
         for (let n = 0; id; n++) {
           if (n > 10 || ctx.taskDel.has(id)) return '?';
-          const r = await db.prepare('SELECT project, parent FROM tasks WHERE id=?').bind(id).first();
+          const r = await ctx.task(id);
           if (!r && !ctx.taskIns.has(id)) return '?';
           const proj = ctx.taskProj.has(id) ? ctx.taskProj.get(id) : r?.project ?? null;
           if (proj) found.add(proj);
