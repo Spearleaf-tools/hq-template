@@ -169,7 +169,7 @@ function ensureBasics(){
 // ---------------------------------------------------------------------------
 // Saving
 // ---------------------------------------------------------------------------
-let saveState='saved',saveMsg='',inflight=false,again=false,saveTimer=null,retryTimer=null;
+let saveState='saved',saveMsg='',inflight=false,again=false,saveTimer=null,retryTimer=null,retryMs=8000;
 // Counts local changes and saves. A teammate refresh that started before one of them is thrown away, so it can
 // never put older data back on screen.
 let gen=0,refreshSeq=0;
@@ -211,6 +211,7 @@ async function commit(){
     const r=await fetch('/api/sync',{method:'POST',headers:{'X-HQ':'1','Content-Type':'application/json'},body:JSON.stringify({changes:ch})});
     if(r.status===401){inflight=false;sessionEnded();return}
     const j=await r.json().catch(()=>({}));
+    retryMs=8000;
     if(r.ok){SNAP=sent;closeOutbox();setSave('saved')}
     else if(r.status>=400&&r.status<500){
       // Refused: put back the server's copy of the row it refused (or every row in this save, if it didn't say which).
@@ -225,7 +226,7 @@ async function commit(){
       ensureBasics();render();toast(`Couldn’t save: ${j.error||'not allowed'}. That change was undone.`);
       if(diff().length)again=true;else setSave('saved');
     }else throw new Error(j.error||'Server error');
-  }catch(e){setSave('error',navigator.onLine?'Didn’t save':'You’re offline');clearTimeout(retryTimer);retryTimer=setTimeout(commit,8000)}
+  }catch(e){setSave('error',navigator.onLine?'Didn’t save':'You’re offline');clearTimeout(retryTimer);retryTimer=setTimeout(commit,retryMs);retryMs=Math.min(retryMs*2,600000)}// back off to 10 min: a save the server keeps failing once ran up 5M database reads in an hour
   finally{inflight=false;if(again){again=false;schedule(50)}}
 }
 function setSave(state,msg){saveState=state;saveMsg=msg||'';document.querySelectorAll('.savest').forEach(paintSave)}
