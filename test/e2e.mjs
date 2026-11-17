@@ -359,6 +359,7 @@ const login = async (email) => (await fetch(BASE + '/auth/dev', { method: 'POST'
 const as = (ck) => ({
   sync: (changes) => fetch(BASE + '/api/sync', { method: 'POST', headers: { 'X-HQ': '1', 'Content-Type': 'application/json', Cookie: ck }, body: JSON.stringify({ changes }) }),
   data: async () => (await fetch(BASE + '/api/data', { headers: { 'X-HQ': '1', Cookie: ck } })).json(),
+  archive: (pid) => fetch(BASE + '/api/archive?project=' + pid, { headers: { 'X-HQ': '1', Cookie: ck } }),
   me: async () => (await (await fetch(BASE + '/api/me', { headers: { 'X-HQ': '1', Cookie: ck } })).json()).me.id,
 });
 // Only true or false counts: anything else (a name passed first by mistake) would always look like a pass.
@@ -477,6 +478,26 @@ await expect(jess, 400, 'a task that moves has to take its subtasks along', [{ t
 await expect(jess, 400, 'a subtask can’t be added under a parent deleted in the same save', [{ t: 'tasks', id: 't_pub', del: true }, { t: 'tasks', id: 't_orphan', ins: true, f: { project: 'p_member', parent: 't_pub', title: 'Orphan', status: 'todo' } }]);
 await expect(jess, 400, 'the same row twice in one save is refused (delete, then re-promote)', [{ t: 'projectMembers', id: `p_secret|${jessId}`, del: true }, { t: 'projectMembers', id: `p_secret|${jessId}`, f: { level: 'manage' } }]);
 await boss.sync([{ t: 'settings', id: 'hidden', f: { value: '' } }]);
+
+// The archive: tasks finished over 30 days ago stay out of the full load and come from /api/archive.
+const old = { project: 'p_secret', parent: null, status: 'done', doneAt: '2026-01-05' };
+await expect(jess, 200, 'old finished tasks for the archive checks', [
+  { t: 'tasks', id: 't_old', ins: true, f: { ...old, title: 'Old and done' } },
+  { t: 'tasks', id: 't_old_kid', ins: true, f: { ...old, parent: 't_old', title: 'Its done subtask' } },
+  { t: 'comments', id: 'c_old', ins: true, f: { task: 't_old', by: jessId, body: 'Old note', at: '2026-01-05T10:00:00Z' } },
+  { t: 'tasks', id: 't_old_open', ins: true, f: { ...old, title: 'Done, but a subtask is open' } },
+  { t: 'tasks', id: 't_old_open_kid', ins: true, f: { ...old, parent: 't_old_open', status: 'todo', doneAt: null, title: 'Still open' } },
+  ...(rockId ? [{ t: 'tasks', id: 't_old_rock', ins: true, f: { ...old, rock: rockId, title: 'Old milestone' } }] : []),
+]);
+const ad = await jess.data(), ids = new Set(ad.data.tasks.map((t) => t.id));
+check(!ids.has('t_old') && !ids.has('t_old_kid') && !ad.data.comments.some((c) => c.id === 'c_old'), 'opening HQ leaves out an old finished task, its subtasks and comments');
+check(ids.has('t_old_open') && ids.has('t_old_open_kid') && (!rockId || ids.has('t_old_rock')), 'a task with open work under it, or tied to a Rock, still loads');
+check(ad.archived?.p_secret === 1, 'the project says how many are in its archive', JSON.stringify(ad.archived));
+const ja = await (await jess.archive('p_secret')).json();
+check(['t_old', 't_old_kid'].every((id) => ja.tasks.some((t) => t.id === id)) && ja.comments.some((c) => c.id === 'c_old') && ja.more === false, 'Show archive brings them back with comments', JSON.stringify(ja).slice(0, 90));
+check((await kim.archive('p_secret')).status === 403 && !(await kim.data()).archived?.p_secret, 'an outsider can’t open a private project’s archive or see its count');
+await expect(jess, 200, 'reopening an archived task', [{ t: 'tasks', id: 't_old', f: { status: 'todo', doneAt: null } }]);
+check((await jess.data()).data.tasks.some((t) => t.id === 't_old'), 'a reopened task loads again');
 
 for (const [s, n, v] of results) console.log(`${s === 'ok' ? '✓' : '✗'} ${n}${v !== '' ? '  (' + v + ')' : ''}`);
 const fails = results.filter((x) => x[0] !== 'ok').length;

@@ -47,19 +47,35 @@ export class Refused extends Error {
 const bad = (m) => new Refused(400, m);
 const no = (m) => new Refused(403, m);
 
+// The archive (2026-11-17): a project's task finished more than 30 days ago stays out of the full load, with its
+// subtasks and comments, and comes from /api/archive when someone asks. Sending every task on every open cost 30-45 ms
+// of Worker CPU at 3,600 tasks, past the free plan's 10 ms. A task tied to a Rock, or with a subtask that is still open
+// or tied to a Rock, always loads, so Rock progress and open work never go missing. `r` is the top-level task.
+const ARCHIVED = `r.parent IS NULL AND r.project IS NOT NULL AND r.status='done' AND coalesce(r.doneAt,'') < ?1 AND coalesce(r.rock,'')=''
+  AND NOT EXISTS (SELECT 1 FROM tasks k WHERE k.parent=r.id AND (k.status<>'done' OR coalesce(k.rock,'')<>''))`;
+const cutoff = () => new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+const parsed = (t, rows) => rows.map((r) => {
+  for (const k of TABLES[t].json || []) if (r[k] != null) { try { r[k] = JSON.parse(r[k]); } catch { r[k] = null; } }
+  return r;
+});
+
 export async function getData(env, me) {
   const out = {};
-  const res = await env.DB.batch(Object.keys(TABLES).map((t) => env.DB.prepare(`SELECT * FROM "${t}"`)));
-  Object.keys(TABLES).forEach((t, i) => {
-    const json = TABLES[t].json || [];
-    out[t] = res[i].results.map((r) => {
-      for (const k of json) if (r[k] != null) { try { r[k] = JSON.parse(r[k]); } catch { r[k] = null; } }
-      return r;
-    });
-  });
+  const db = env.DB, cut = cutoff();
+  const res = await db.batch([
+    ...Object.keys(TABLES).map((t) => t === 'tasks'
+      ? db.prepare(`SELECT t.* FROM tasks t LEFT JOIN tasks r ON r.id = coalesce(t.parent, t.id) WHERE r.id IS NULL OR NOT (${ARCHIVED})`).bind(cut)
+      : db.prepare(`SELECT * FROM "${t}"`)),
+    db.prepare(`SELECT r.project, count(*) AS n FROM tasks r WHERE ${ARCHIVED} GROUP BY r.project`).bind(cut),
+  ]);
+  Object.keys(TABLES).forEach((t, i) => { out[t] = parsed(t, res[i].results); });
+  const counts = res[res.length - 1].results;
+  // A comment comes with its task: an archived task's comments come with the archive.
+  const loaded = new Set(out.tasks.map((t) => t.id));
+  out.comments = out.comments.filter((c) => loaded.has(c.task));
   // `hidden.ms`: milestones a member can't see (they sit in a private project), counted per Rock, titles left out.
   const hidden = { ms: {} };
-  if (out.people.find((p) => p.id === me.id)?.role === 'Admin') return { data: out, hidden };
+  if (out.people.find((p) => p.id === me.id)?.role === 'Admin') return { data: out, hidden, archived: Object.fromEntries(counts.map((c) => [c.project, c.n])) };
   const off = hiddenAreas(out.settings.find((s) => s.id === 'hidden')?.value);
   for (const a of off) for (const t of AREAS[a]) out[t] = [];
   out.vtoVersions = out.vtoVersions.filter((v) => v.audience !== 'admins');
@@ -98,7 +114,34 @@ export async function getData(env, me) {
   out.comments = out.comments.filter((c) => seen.has(c.task));
   out.projects = out.projects.filter((p) => canSee(st, p.id, me.id));
   out.projectMembers = out.projectMembers.filter((m) => canSee(st, m.project, me.id));
-  return { data: out, hidden };
+  return { data: out, hidden, archived: Object.fromEntries(counts.filter((c) => canSee(st, c.project, me.id)).map((c) => [c.project, c.n])) };
+}
+
+// One page of a project's archive, newest finished first, with the subtasks and comments that go with it.
+const PAGE = 200;
+export async function getArchive(env, me, pid, after) {
+  const db = env.DB;
+  if (typeof pid !== 'string' || !/^[A-Za-z0-9_.|:-]{1,120}$/.test(pid)) throw bad('Which project?');
+  const [pr, pm, pe] = await db.batch([
+    db.prepare('SELECT id, visibility FROM projects'), db.prepare('SELECT project, person, level FROM projectMembers'),
+    db.prepare("SELECT id FROM people WHERE role='Admin'"),
+  ]);
+  if (!canSee(access(pr.results, pm.results, new Set(pe.results.map((r) => r.id))), pid, me.id)) throw no('That project is private');
+  // Each page carries on after the last one shown ("<doneAt>|<id>"), so a task reopened in between never makes one skip.
+  const cut = typeof after === 'string' ? after.indexOf('|') : -1;
+  const [ad, aid] = cut >= 0 ? [after.slice(0, cut), after.slice(cut + 1)] : [null, null];
+  const roots = (await db.prepare(`SELECT * FROM tasks r WHERE r.project=?2 AND ${ARCHIVED}
+    AND (?3 IS NULL OR coalesce(r.doneAt,'') < ?3 OR (coalesce(r.doneAt,'') = ?3 AND r.id > ?4)) ORDER BY coalesce(r.doneAt,'') DESC, r.id LIMIT ${PAGE + 1}`)
+    .bind(cutoff(), pid, ad, aid).all()).results;
+  const more = roots.length > PAGE;
+  if (more) roots.pop();
+  const last = roots[roots.length - 1];
+  const ids = JSON.stringify(roots.map((r) => r.id));
+  const [subs, cms] = await db.batch([
+    db.prepare('SELECT * FROM tasks WHERE parent IN (SELECT value FROM json_each(?1))').bind(ids),
+    db.prepare('SELECT * FROM comments WHERE task IN (SELECT value FROM json_each(?1)) OR task IN (SELECT id FROM tasks WHERE parent IN (SELECT value FROM json_each(?1)))').bind(ids),
+  ]);
+  return { tasks: parsed('tasks', [...roots, ...subs.results]), comments: cms.results, more, next: more ? `${last.doneAt || ''}|${last.id}` : null };
 }
 
 function value(t, k, v) {

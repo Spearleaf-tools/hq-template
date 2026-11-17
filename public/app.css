@@ -754,3 +754,5 @@ section.drop-in>.lg-h{box-shadow:0 2px 0 var(--ink)}
 .secpen{color:var(--muted);opacity:0;transition:opacity .15s;display:inline-flex;align-self:center}
 .lg-h:hover .secpen,.col-h:hover .secpen{opacity:1}
 .secname:focus+.secpen{opacity:0}
+/* The archive line under a project's tasks (tasks finished more than 30 days ago load on request). */
+.arch-bar{margin:18px 0 8px;color:var(--muted);font-size:14px;display:flex;align-items:center;gap:6px}
