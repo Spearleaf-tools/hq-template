@@ -6,7 +6,7 @@
     "dev": "wrangler dev",
     "db:local": "wrangler d1 migrations apply hq --local",
     "db:remote": "wrangler d1 migrations apply hq --remote",
-    "deploy": "wrangler deploy"
+    "deploy": "npm run db:remote && wrangler deploy"
   },
   "devDependencies": {
     "wrangler": "4.99.0"
